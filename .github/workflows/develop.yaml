@@ -1,22 +1,27 @@
 on:
   push:
     branches:
-      - 'master'
+      - "master"
   pull_request:
     branches:
-      - 'master'
+      - "master"
+
+env:
+  VULTR_REGISTRY: sjc.vultrcr.com
+  VULTR_IMAGE_NAME: seven/bird-lg-go
+  GHCR_IMAGE_NAME: bird-lg-go
 
 jobs:
   go-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Setup Golang
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
 
-      - name: Run frontend unit test
+      - name: Run Frontend Unit Test
         run: |
           export GO111MODULE=on
           cd frontend
@@ -24,7 +29,7 @@ jobs:
           go test -v ./...
           cd ..
 
-      - name: Run proxy unit test
+      - name: Run Proxy Unit Test
         run: |
           export GO111MODULE=on
           cd proxy
@@ -32,96 +37,136 @@ jobs:
           go test -v ./...
           cd ..
 
-  # docker-test:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v3
+  docker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
 
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-  #     - name: Test whois binary in frontend image
-  #       run: |
-  #         docker build -t local/frontend frontend/
-  #         docker run --rm --net host --entrypoint whois local/frontend -I github.com || exit 1
-  #         docker run --rm --net host --entrypoint whois local/frontend -h whois.ripe.net github.com || exit 1
-  #         docker run --rm --net host --entrypoint whois local/frontend -h whois.ripe.net:43 github.com || exit 1
+      - name: Test whois Binary in Frontend Image
+        run: |
+          docker build -t local/frontend frontend/
+          docker run --rm --net host --entrypoint whois local/frontend -I github.com || exit 1
+          docker run --rm --net host --entrypoint whois local/frontend -h whois.ripe.net github.com || exit 1
+          docker run --rm --net host --entrypoint whois local/frontend -h whois.ripe.net:43 github.com || exit 1
 
-  #     - name: Test traceroute binary in proxy image
-  #       run: |
-  #         docker build -t local/proxy proxy/
-  #         docker run --rm --net host --entrypoint traceroute local/proxy 127.0.0.1 || exit 1
-  #         docker run --rm --net host --entrypoint traceroute local/proxy ::1 || exit 1
+      - name: Test traceroute Binary in Proxy Image
+        run: |
+          docker build -t local/proxy proxy/
+          docker run --rm --net host --entrypoint traceroute local/proxy 127.0.0.1 || exit 1
+          docker run --rm --net host --entrypoint traceroute local/proxy ::1 || exit 1
 
-  #     - name: Test mtr binary in proxy image
-  #       run: |
-  #         docker build -t local/proxy:mtr -f proxy/Dockerfile.mtr proxy/
-  #         docker run --rm --net host --entrypoint mtr local/proxy:mtr -w -c1 -Z1 -G1 -b 127.0.0.1 || exit 1
-  #         docker run --rm --net host --entrypoint mtr local/proxy:mtr -w -c1 -Z1 -G1 -b ::1 || exit 1
+      - name: Test mtr Binary in Proxy Image
+        run: |
+          docker build -t local/proxy:mtr -f proxy/Dockerfile.mtr proxy/
+          docker run --rm --net host --entrypoint mtr local/proxy:mtr -w -c1 -Z1 -G1 -b 127.0.0.1 || exit 1
+          docker run --rm --net host --entrypoint mtr local/proxy:mtr -w -c1 -Z1 -G1 -b ::1 || exit 1
 
-  # docker-develop:
-  #   runs-on: ubuntu-latest
-  #   needs:
-  #     - go-test
-  #     - docker-test
-  #   if: github.event_name != 'pull_request'
-  #   steps:
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v2
+  docker-dev:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    needs:
+      - go-test
+      - docker-test
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@v2
 
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v2
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
 
-  #     - name: Login to Docker Hub
-  #       uses: docker/login-action@v2
-  #       with:
-  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #         password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Login in to Vultr Container Registry
+        id: vultr
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.VULTR_REGISTRY }}
+          username: ${{ secrets.VULTR_USERNAME }}
+          password: ${{ secrets.VULTR_PASSWORD }}
 
-  #     - name: Login to GitHub Container Registry
-  #       uses: docker/login-action@v2
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.repository_owner }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GitHub Container Registry
+        id: ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-  #     - name: Build frontend docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:frontend'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lg-go:develop
-  #           xddxdd/bird-lg-go:develop-${{ github.sha }}
-  #           ghcr.io/xddxdd/bird-lg-go:frontend-develop
-  #           ghcr.io/xddxdd/bird-lg-go:frontend-develop-${{ github.sha }}
+      - name: Build - Frontend
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: "{{defaultContext}}:frontend"
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:frontend-dev
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:frontend-dev-${{ github.sha }}
+            ghcr.io/realsunyz/bird-lg-go:frontend-dev
+            ghcr.io/realsunyz/bird-lg-go:frontend-dev-${{ github.sha }}
 
-  #     - name: Build proxy docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:proxy'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lgproxy-go:develop
-  #           xddxdd/bird-lgproxy-go:develop-${{ github.sha }}
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-develop
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-develop-${{ github.sha }}
+      - name: Generate Artifact Attestation (OCI Referrers) - Frontend
+        id: attest-frontend
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.frontend.outputs.digest }}
+          push-to-registry: true
 
-  #     - name: Build proxy docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:proxy'
-  #         file: 'Dockerfile.mtr'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lgproxy-go:develop-mtr
-  #           xddxdd/bird-lgproxy-go:develop-${{ github.sha }}-mtr
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-develop-mtr
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-develop-${{ github.sha }}-mtr
+      - name: Build - Proxy
+        id: proxy
+        uses: docker/build-push-action@v6
+        with:
+          context: "{{defaultContext}}:proxy"
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-dev
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-dev-${{ github.sha }}
+            ghcr.io/realsunyz/bird-lg-go:proxy-dev
+            ghcr.io/realsunyz/bird-lg-go:proxy-dev-${{ github.sha }}
+
+      - name: Generate Artifact Attestation (OCI Referrers) - Proxy
+        id: attest-proxy
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.proxy.outputs.digest }}
+          push-to-registry: true
+
+      - name: Build - Proxy (MTR)
+        id: proxy-mtr
+        uses: docker/build-push-action@v6
+        with:
+          context: "{{defaultContext}}:proxy"
+          file: "Dockerfile.mtr"
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-dev-mtr
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-dev-mtr-${{ github.sha }}
+            ghcr.io/realsunyz/bird-lg-go:proxy-dev-mtr
+            ghcr.io/realsunyz/bird-lg-go:proxy-dev-mtr-${{ github.sha }}
+
+      - name: Generate Artifact Attestation (OCI Referrers) - Proxy (MTR)
+        id: attest-proxy-mtr
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.proxy-mtr.outputs.digest }}
+          push-to-registry: true
