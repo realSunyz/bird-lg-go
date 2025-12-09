@@ -1,6 +1,11 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +15,16 @@ import (
 
 	"github.com/magiconair/properties/assert"
 )
+
+func signTraceroutePayload(t *testing.T, priv *ecdsa.PrivateKey, payload string) string {
+	t.Helper()
+	digest := sha256.Sum256([]byte(payload))
+	sig, err := ecdsa.SignASN1(rand.Reader, priv, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(sig)
+}
 
 func TestTracerouteArgsToString(t *testing.T) {
 	result := tracerouteArgsToString("traceroute", []string{
@@ -165,4 +180,44 @@ func TestTracerouteHandlerPostprocess(t *testing.T) {
 	tracerouteHandler(w, r)
 	assert.Equal(t, w.Code, http.StatusOK)
 	assert.Equal(t, w.Body.String(), "first line\nthird line\n\n1 hops not responding.")
+}
+
+func TestTracerouteHandlerSignatureMissing(t *testing.T) {
+	setting.tr_bin = "sh"
+	setting.tr_flags = []string{"-c", "echo ok"}
+	setting.tr_raw = true
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.ecdsaPublic = &priv.PublicKey
+	defer func() { setting.ecdsaPublic = nil }()
+
+	r := httptest.NewRequest(http.MethodGet, "/traceroute?q="+url.QueryEscape("1.1.1.1"), nil)
+	w := httptest.NewRecorder()
+	tracerouteHandler(w, r)
+	assert.Equal(t, w.Code, http.StatusUnauthorized)
+}
+
+func TestTracerouteHandlerSignatureValid(t *testing.T) {
+	setting.tr_bin = "sh"
+	setting.tr_flags = []string{"-c", "echo ok"}
+	setting.tr_raw = true
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.ecdsaPublic = &priv.PublicKey
+	defer func() { setting.ecdsaPublic = nil }()
+
+	payload := "1.1.1.1"
+	sig := signTraceroutePayload(t, priv, payload)
+
+	r := httptest.NewRequest(http.MethodGet, "/traceroute?q="+url.QueryEscape(payload)+"&sig="+url.QueryEscape(sig), nil)
+	w := httptest.NewRecorder()
+	tracerouteHandler(w, r)
+	assert.Equal(t, w.Code, http.StatusOK)
+	assert.Equal(t, w.Body.String(), "ok\n")
 }

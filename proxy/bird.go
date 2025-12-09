@@ -63,6 +63,12 @@ func birdHandler(httpW http.ResponseWriter, httpR *http.Request) {
 	if query == "" {
 		invalidHandler(httpW, httpR)
 	} else {
+		if err := verifySignature(httpR, query); err != nil {
+			httpW.WriteHeader(http.StatusUnauthorized)
+			httpW.Write([]byte("Invalid signature\n"))
+			return
+		}
+
 		// Initialize BIRDv4 socket
 		bird, err := net.Dial("unix", setting.birdSocket)
 		if err != nil {

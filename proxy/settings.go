@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/google/shlex"
@@ -17,6 +21,7 @@ type viperSettingType struct {
 	TracerouteBin   string   `mapstructure:"traceroute_bin"`
 	TracerouteFlags string   `mapstructure:"traceroute_flags"`
 	TracerouteRaw   bool     `mapstructure:"traceroute_raw"`
+	ECDSAPublicKey  string   `mapstructure:"ecdsa_public_key"`
 }
 
 // Parse settings with viper, and convert to legacy setting format
@@ -33,6 +38,7 @@ func parseSettings() {
 	viper.BindEnv("bird_socket", "BIRD_SOCKET")
 	viper.BindEnv("listen", "BIRDLG_LISTEN", "BIRDLG_PROXY_PORT")
 	viper.BindEnv("allowed_ips", "ALLOWED_IPS")
+	viper.BindEnv("ecdsa_public_key", "ECDSA_PUBLIC_KEY")
 
 	pflag.String("bird", "/var/run/bird/bird.ctl", "socket file for bird, set either in parameter or environment variable BIRD_SOCKET")
 	viper.BindPFlag("bird_socket", pflag.Lookup("bird"))
@@ -51,6 +57,9 @@ func parseSettings() {
 
 	pflag.Bool("traceroute_raw", false, "whether to display traceroute outputs raw; set via parameter or environment variable BIRDLG_TRACEROUTE_RAW")
 	viper.BindPFlag("traceroute_raw", pflag.Lookup("traceroute_raw"))
+
+	pflag.String("ecdsa_public_key", "", "path to ECDSA public key (PEM) used to verify signatures")
+	viper.BindPFlag("ecdsa_public_key", pflag.Lookup("ecdsa_public_key"))
 
 	pflag.Parse()
 
@@ -101,6 +110,26 @@ func parseSettings() {
 	}
 
 	setting.tr_raw = viperSettings.TracerouteRaw
+
+	if viperSettings.ECDSAPublicKey != "" {
+		pubKeyBytes, err := os.ReadFile(viperSettings.ECDSAPublicKey)
+		if err != nil {
+			panic(fmt.Errorf("failed to read ECDSA public key: %w", err))
+		}
+		block, _ := pem.Decode(pubKeyBytes)
+		if block == nil {
+			panic(fmt.Errorf("failed to decode ECDSA public key PEM"))
+		}
+		pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			panic(fmt.Errorf("failed to parse ECDSA public key: %w", err))
+		}
+		ecdsaPubKey, ok := pub.(*ecdsa.PublicKey)
+		if !ok {
+			panic(fmt.Errorf("ECDSA public key required, got %T", pub))
+		}
+		setting.ecdsaPublic = ecdsaPubKey
+	}
 
 	fmt.Printf("%#v\n", setting)
 }

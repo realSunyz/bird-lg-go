@@ -89,6 +89,12 @@ func tracerouteHandler(httpW http.ResponseWriter, httpR *http.Request) {
 	if query == "" {
 		invalidHandler(httpW, httpR)
 	} else {
+		if err := verifySignature(httpR, query); err != nil {
+			httpW.WriteHeader(http.StatusUnauthorized)
+			httpW.Write([]byte("Invalid signature\n"))
+			return
+		}
+
 		args, err := shlex.Split(query)
 		if err != nil {
 			httpW.WriteHeader(http.StatusInternalServerError)

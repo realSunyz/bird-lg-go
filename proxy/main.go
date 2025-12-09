@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"net"
 	"net/http"
@@ -67,6 +68,7 @@ type settingType struct {
 	tr_bin      string
 	tr_flags    []string
 	tr_raw      bool
+	ecdsaPublic *ecdsa.PublicKey
 }
 
 var setting settingType

@@ -3,6 +3,11 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -99,6 +104,16 @@ func (s *BirdServer) Close() {
 		return
 	}
 	s.server.Close()
+}
+
+func signPayload(t *testing.T, priv *ecdsa.PrivateKey, payload string) string {
+	t.Helper()
+	digest := sha256.Sum256([]byte(payload))
+	sig, err := ecdsa.SignASN1(rand.Reader, priv, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(sig)
 }
 
 func TestBirdReadln(t *testing.T) {
@@ -210,4 +225,62 @@ func TestBirdHandlerEOF(t *testing.T) {
 
 	assert.Equal(t, w.Code, http.StatusOK)
 	assert.Equal(t, w.Body.String(), "Mock Response\nEOF")
+}
+
+func TestBirdHandlerSignatureMissing(t *testing.T) {
+	server := BirdServer{
+		t:             t,
+		expectedQuery: "show protocols",
+		response:      "Mock Response",
+		injectError:   "",
+	}
+
+	server.Listen()
+	go server.Run()
+	defer server.Close()
+
+	setting.birdSocket = server.socket
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.ecdsaPublic = &priv.PublicKey
+	defer func() { setting.ecdsaPublic = nil }()
+
+	r := httptest.NewRequest(http.MethodGet, "/bird?q="+url.QueryEscape(server.expectedQuery), nil)
+	w := httptest.NewRecorder()
+	birdHandler(w, r)
+
+	assert.Equal(t, w.Code, http.StatusUnauthorized)
+}
+
+func TestBirdHandlerSignatureValid(t *testing.T) {
+	server := BirdServer{
+		t:             t,
+		expectedQuery: "show protocols",
+		response:      "Mock Response",
+		injectError:   "",
+	}
+
+	server.Listen()
+	go server.Run()
+	defer server.Close()
+
+	setting.birdSocket = server.socket
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.ecdsaPublic = &priv.PublicKey
+	defer func() { setting.ecdsaPublic = nil }()
+
+	sig := signPayload(t, priv, server.expectedQuery)
+	r := httptest.NewRequest(http.MethodGet, "/bird?q="+url.QueryEscape(server.expectedQuery)+"&sig="+url.QueryEscape(sig), nil)
+	w := httptest.NewRecorder()
+	birdHandler(w, r)
+
+	assert.Equal(t, w.Code, http.StatusOK)
+	assert.Equal(t, w.Body.String(), server.response+"\n")
 }
