@@ -2,6 +2,11 @@ on:
   release:
     types: [created]
 
+env:
+  VULTR_REGISTRY: sjc.vultrcr.com
+  VULTR_IMAGE_NAME: seven/bird-lg-go
+  GHCR_IMAGE_NAME: bird-lg-go
+
 jobs:
   go-release:
     name: Release Go Binary
@@ -9,20 +14,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux, windows, darwin]
-        goarch: ["386", amd64, "arm", arm64]
-        exclude:
-          - goarch: "386"
-            goos: darwin
-          - goarch: "arm"
-            goos: darwin
-          - goarch: "arm"
-            goos: windows
+        goos: [linux, windows]
+        goarch: [amd64, arm64]
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-    - name: Release frontend
+    - name: Release Frontend
       uses: wangyoucao577/go-release-action@v1.53
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,72 +31,110 @@ jobs:
         pre_command: |
           export CGO_ENABLED=0
 
-    - name: Release proxy
+    - name: Release Proxy
       uses: wangyoucao577/go-release-action@v1.53
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         goos: ${{ matrix.goos }}
         goarch: ${{ matrix.goarch }}
         project_path: "./proxy"
-        binary_name: "bird-lgproxy-go"
+        binary_name: "bird-lg-proxy-go"
         pre_command: |
           export CGO_ENABLED=0
 
-  # docker-release:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v2
+  docker-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
 
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-  #     - name: Login to Docker Hub
-  #       uses: docker/login-action@v2
-  #       with:
-  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #         password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Login in to Vultr Container Registry
+        id: vultr
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.VULTR_REGISTRY }}
+          username: ${{ secrets.VULTR_USERNAME }}
+          password: ${{ secrets.VULTR_PASSWORD }}
 
-  #     - name: Login to GitHub Container Registry
-  #       uses: docker/login-action@v2
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.repository_owner }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GitHub Container Registry
+        id: ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-  #     - name: Build frontend docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:frontend'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lg-go:latest
-  #           xddxdd/bird-lg-go:${{ github.event.release.tag_name }}
-  #           ghcr.io/xddxdd/bird-lg-go:frontend
-  #           ghcr.io/xddxdd/bird-lg-go:frontend-${{ github.event.release.tag_name }}
+      - name: Build - Frontend
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: '{{defaultContext}}:frontend'
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags:  |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:latest
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:latest-${{ github.event.release.tag_name }}
+            ghcr.io/realsunyz/bird-lg-go:latest
+            ghcr.io/realsunyz/bird-lg-go:latest-${{ github.event.release.tag_name }}
 
-  #     - name: Build proxy docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:proxy'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lgproxy-go:latest
-  #           xddxdd/bird-lgproxy-go:${{ github.event.release.tag_name }}
-  #           ghcr.io/xddxdd/bird-lg-go:proxy
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-${{ github.event.release.tag_name }}
+      - name: Generate Artifact Attestation (OCI Referrers) - Frontend
+        id: attest-frontend
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.frontend.outputs.digest }}
+          push-to-registry: true
 
-  #     - name: Build proxy docker image
-  #       uses: docker/build-push-action@v4
-  #       with:
-  #         context: '{{defaultContext}}:proxy'
-  #         file: 'Dockerfile.mtr'
-  #         platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7
-  #         push: true
-  #         tags: |
-  #           xddxdd/bird-lgproxy-go:latest-mtr
-  #           xddxdd/bird-lgproxy-go:${{ github.event.release.tag_name }}-mtr
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-mtr
-  #           ghcr.io/xddxdd/bird-lg-go:proxy-${{ github.event.release.tag_name }}-mtr
+      - name: Build - Proxy
+        id: proxy
+        uses: docker/build-push-action@v6
+        with:
+          context: '{{defaultContext}}:proxy'
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-${{ github.event.release.tag_name }}
+            ghcr.io/realsunyz/bird-lg-go:proxy
+            ghcr.io/realsunyz/bird-lg-go:proxy-${{ github.event.release.tag_name }}
+
+      - name: Generate Artifact Attestation (OCI Referrers) - Proxy
+        id: attest-proxy
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.proxy.outputs.digest }}
+          push-to-registry: true
+
+      - name: Build - Proxy (MTR)
+        id: proxy-mtr
+        uses: docker/build-push-action@v6
+        with:
+          context: '{{defaultContext}}:proxy'
+          file: 'Dockerfile.mtr'
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-mtr
+            ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:proxy-mtr-${{ github.event.release.tag_name }}
+            ghcr.io/realsunyz/bird-lg-go:proxy-mtr
+            ghcr.io/realsunyz/bird-lg-go:proxy-mtr-${{ github.event.release.tag_name }}
+
+      - name: Generate Artifact Attestation (OCI Referrers) - Proxy (MTR)
+        id: attest-proxy-mtr
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-name: ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}
+          subject-digest: ${{ steps.proxy-mtr.outputs.digest }}
+          push-to-registry: true
