@@ -8,11 +8,12 @@ import (
 
 const (
 	NETWORK_UNKNOWN = 0
-	NETWORK_DOWN = 1
-	NETWORK_UP = 2
+	NETWORK_DOWN    = 1
+	NETWORK_UP      = 2
 )
 
 var networkState int = NETWORK_UNKNOWN
+
 func checkNetwork(t *testing.T) {
 	if networkState == NETWORK_UNKNOWN {
 		conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 1*time.Second)

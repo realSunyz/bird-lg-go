@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"net"
 	"os"
 	"strings"
@@ -27,6 +28,7 @@ type settingType struct {
 	timeOut           int
 	connectionTimeOut int
 	trustProxyHeaders bool
+	ecdsaPrivate      *ecdsa.PrivateKey
 }
 
 var setting settingType

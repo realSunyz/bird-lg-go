@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -28,6 +32,7 @@ type viperSettingType struct {
 	TimeOut           int      `mapstructure:"timeout"`
 	ConnectionTimeOut int      `mapstructure:"connection_timeout"`
 	TrustProxyHeaders bool     `mapstructure:"trust_proxy_headers"`
+	ECDSAPrivateKey   string   `mapstructure:"ecdsa_private_key"`
 }
 
 // Parse settings with viper, and convert to legacy setting format
@@ -98,6 +103,11 @@ func parseSettings() {
 	pflag.Bool("trust-proxy-headers", false, "Trust X-Forwared-For, X-Real-IP, X-Forwarded-Proto, X-Forwarded-Scheme and X-Forwarded-Host sent by the client")
 	viper.BindPFlag("trust_proxy_headers", pflag.Lookup("trust-proxy-headers"))
 
+	pflag.String("ecdsa-private-key", "", "path to ECDSA private key (PEM) used to sign proxy requests")
+	viper.BindPFlag("ecdsa_private_key", pflag.Lookup("ecdsa-private-key"))
+
+	viper.BindEnv("ecdsa_private_key", "ECDSA_PRIVATE_KEY")
+
 	pflag.Parse()
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -149,6 +159,33 @@ func parseSettings() {
 	setting.timeOut = viperSettings.TimeOut
 	setting.connectionTimeOut = viperSettings.ConnectionTimeOut
 	setting.trustProxyHeaders = viperSettings.TrustProxyHeaders
+
+	if viperSettings.ECDSAPrivateKey != "" {
+		keyBytes, err := os.ReadFile(viperSettings.ECDSAPrivateKey)
+		if err != nil {
+			panic(fmt.Errorf("failed to read ECDSA private key: %w", err))
+		}
+		block, _ := pem.Decode(keyBytes)
+		if block == nil {
+			panic(fmt.Errorf("failed to decode ECDSA private key PEM"))
+		}
+
+		var parsedKey interface{}
+		if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+			parsedKey = key
+		} else if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+			parsedKey = key
+		} else {
+			panic(fmt.Errorf("failed to parse ECDSA private key: %w", err))
+		}
+
+		switch key := parsedKey.(type) {
+		case *ecdsa.PrivateKey:
+			setting.ecdsaPrivate = key
+		default:
+			panic(fmt.Errorf("ECDSA private key required, got %T", parsedKey))
+		}
+	}
 
 	fmt.Printf("%#v\n", setting)
 }

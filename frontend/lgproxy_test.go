@@ -1,7 +1,13 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -159,5 +165,50 @@ func TestBatchRequestInvalidServer(t *testing.T) {
 	}
 	if !strings.Contains(response[0], "invalid server") {
 		t.Error("Did not produce invalid server error")
+	}
+}
+
+func TestBatchRequestWithSignature(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.ecdsaPrivate = priv
+	defer func() { setting.ecdsaPrivate = nil }()
+
+	httpmock.RegisterResponder("GET", "=~^http://1\\.1\\.1\\.1:8000/mock\\?q=cmd(&sig=.*)?$",
+		func(req *http.Request) (*http.Response, error) {
+			sig := req.URL.Query().Get("sig")
+			if sig == "" {
+				t.Error("missing signature")
+			} else {
+				decoded, err := base64.StdEncoding.DecodeString(sig)
+				if err != nil {
+					t.Error(err)
+				}
+				digest := sha256.Sum256([]byte("cmd"))
+				if !ecdsa.VerifyASN1(&priv.PublicKey, digest[:], decoded) {
+					t.Error("signature verification failed")
+				}
+			}
+			return httpmock.NewStringResponse(200, "Mock Result"), nil
+		},
+	)
+
+	setting.servers = []string{
+		"1.1.1.1",
+	}
+	setting.domain = ""
+	setting.proxyPort = 8000
+	response := batchRequest(setting.servers, "mock", "cmd")
+
+	if len(response) != 1 {
+		t.Error("Did not get response of all mock servers")
+	}
+	if response[0] != "Mock Result" {
+		t.Error("HTTP response mismatch")
 	}
 }

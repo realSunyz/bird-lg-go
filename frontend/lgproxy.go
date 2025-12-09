@@ -45,6 +45,13 @@ func batchRequest(servers []string, endpoint string, command string) []string {
 	// Channel and array for storing responses
 	var ch chan channelData = make(chan channelData)
 	var responseArray []string = make([]string, len(servers))
+	sig, sigErr := signPayload(command)
+	if sigErr != nil {
+		for i := range responseArray {
+			responseArray[i] = "request failed: " + sigErr.Error() + "\n"
+		}
+		return responseArray
+	}
 
 	for i, server := range servers {
 		// Check if the server is in the valid server list passed at startup
@@ -71,7 +78,18 @@ func batchRequest(servers []string, endpoint string, command string) []string {
 			if setting.domain != "" {
 				hostname += "." + setting.domain
 			}
-			url := "http://" + hostname + ":" + strconv.Itoa(setting.proxyPort) + "/" + url.PathEscape(endpoint) + "?q=" + url.QueryEscape(command)
+			query := url.Values{}
+			query.Set("q", command)
+			if sig != "" {
+				query.Set("sig", sig)
+			}
+			url := (&url.URL{
+				Scheme:   "http",
+				Host:     hostname + ":" + strconv.Itoa(setting.proxyPort),
+				Path:     "/" + url.PathEscape(endpoint),
+				RawQuery: query.Encode(),
+			}).String()
+
 			go func(url string, i int) {
 				client := http.Client{
 					Transport: createConnectionTimeoutRoundTripper(setting.connectionTimeOut),
