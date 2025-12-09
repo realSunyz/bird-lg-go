@@ -1,3 +1,5 @@
+name: Release Builds
+
 on:
   release:
     types: [created]
@@ -9,7 +11,7 @@ env:
 
 jobs:
   go-release:
-    name: Release Go Binary
+    name: Build Go Binary
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -17,32 +19,33 @@ jobs:
         goos: [linux, windows]
         goarch: [amd64, arm64]
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Release Frontend
-      uses: wangyoucao577/go-release-action@v1.53
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        goos: ${{ matrix.goos }}
-        goarch: ${{ matrix.goarch }}
-        project_path: "./frontend"
-        binary_name: "bird-lg-go"
-        pre_command: |
-          export CGO_ENABLED=0
+      - name: Release Frontend
+        uses: wangyoucao577/go-release-action@v1.53
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          project_path: "./frontend"
+          binary_name: "bird-lg-go"
+          pre_command: |
+            export CGO_ENABLED=0
 
-    - name: Release Proxy
-      uses: wangyoucao577/go-release-action@v1.53
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        goos: ${{ matrix.goos }}
-        goarch: ${{ matrix.goarch }}
-        project_path: "./proxy"
-        binary_name: "bird-lg-proxy-go"
-        pre_command: |
-          export CGO_ENABLED=0
+      - name: Release Proxy
+        uses: wangyoucao577/go-release-action@v1.53
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          project_path: "./proxy"
+          binary_name: "bird-lg-proxy-go"
+          pre_command: |
+            export CGO_ENABLED=0
 
   docker-release:
+    name: Build Docker Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,10 +79,10 @@ jobs:
         id: frontend
         uses: docker/build-push-action@v6
         with:
-          context: '{{defaultContext}}:frontend'
+          context: "{{defaultContext}}:frontend"
           platforms: linux/amd64,linux/arm64
           push: true
-          tags:  |
+          tags: |
             ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:latest
             ${{ env.VULTR_REGISTRY }}/${{ env.VULTR_IMAGE_NAME }}:latest-${{ github.event.release.tag_name }}
             ghcr.io/realsunyz/bird-lg-go:latest
@@ -98,7 +101,7 @@ jobs:
         id: proxy
         uses: docker/build-push-action@v6
         with:
-          context: '{{defaultContext}}:proxy'
+          context: "{{defaultContext}}:proxy"
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -120,8 +123,8 @@ jobs:
         id: proxy-mtr
         uses: docker/build-push-action@v6
         with:
-          context: '{{defaultContext}}:proxy'
-          file: 'Dockerfile.mtr'
+          context: "{{defaultContext}}:proxy"
+          file: "Dockerfile.mtr"
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
